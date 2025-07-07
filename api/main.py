@@ -102,6 +102,38 @@ def _get_average_embeddings_by_pet_id(target_embedding: List[float]) -> Dict[str
         return {}
 
 
+def _get_pet_s3_keys(pet_id: str) -> List[str]:
+    """Get all S3 keys for a given pet_id from Qdrant."""
+    try:
+        scroll_result = qdrant_client.scroll(
+            collection_name=COLLECTION_NAME,
+            scroll_filter={"must": [{"key": "pet_id", "match": {"value": pet_id}}]},
+            limit=1000,
+            with_payload=True
+        )
+        
+        s3_keys = []
+        for point in scroll_result[0]:
+            s3_key = point.payload.get("s3_key")
+            if s3_key:
+                s3_keys.append(s3_key)
+        
+        return s3_keys
+    except Exception as e:
+        print(f"Error getting S3 keys for pet {pet_id}: {e}")
+        return []
+
+
+def _download_from_s3(s3_key: str) -> Optional[bytes]:
+    """Download file from S3 and return bytes."""
+    try:
+        response = s3_client.get_object(Bucket=S3_BUCKET_NAME, Key=s3_key)
+        return response['Body'].read()
+    except (NoCredentialsError, ClientError) as e:
+        print(f"S3 download error for {s3_key}: {e}")
+        return None
+
+
 def _insert_pet_data(pet_id: str, lat: float, lon: float, text: str):
     """Insert or update pet data in the database."""
     conn = sqlite3.connect(DB_PATH)
@@ -661,6 +693,70 @@ async def get_k_nearest_pets_within_radius(
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error processing request: {str(e)}")
+
+
+@app.get("/pet/{pet_id}/images")
+async def get_pet_images(pet_id: str):
+    """Get all images for a specific pet from S3."""
+    try:
+        # Get all S3 keys for this pet
+        s3_keys = _get_pet_s3_keys(pet_id)
+        
+        if not s3_keys:
+            raise HTTPException(status_code=404, detail="No images found for this pet")
+        
+        images = []
+        for s3_key in s3_keys:
+            image_bytes = _download_from_s3(s3_key)
+            if image_bytes:
+                # Convert to base64 for JSON response
+                image_b64 = base64.b64encode(image_bytes).decode('utf-8')
+                images.append({
+                    "s3_key": s3_key,
+                    "filename": os.path.basename(s3_key),
+                    "image_b64": image_b64
+                })
+        
+        if not images:
+            raise HTTPException(status_code=404, detail="Failed to download images for this pet")
+        
+        return {
+            "pet_id": pet_id,
+            "images": images,
+            "count": len(images)
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error retrieving images: {str(e)}")
+
+
+@app.get("/image/{pet_id}/{filename}")
+async def get_single_pet_image(pet_id: str, filename: str):
+    """Get a single image for a pet by filename."""
+    try:
+        s3_key = f"{pet_id}/{filename}"
+        image_bytes = _download_from_s3(s3_key)
+        
+        if not image_bytes:
+            raise HTTPException(status_code=404, detail="Image not found")
+        
+        # Convert to base64 for JSON response
+        image_b64 = base64.b64encode(image_bytes).decode('utf-8')
+        
+        return {
+            "pet_id": pet_id,
+            "filename": filename,
+            "s3_key": s3_key,
+            "image_b64": image_b64
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error retrieving image: {str(e)}")
+
 
 
 if __name__ == "__main__":
