@@ -27,8 +27,32 @@ import sqlite3
 from typing import Dict, Optional
 import json
 
-# Add this to your global variables
-DB_PATH = "pet_database.db"
+import os
+from dotenv import load_dotenv
+
+
+load_dotenv()
+
+DB_PATH = os.getenv("DB_PATH", "pet_database.db")
+
+QDRANT_HOST = os.getenv("QDRANT_HOST", "localhost")
+QDRANT_PORT = int(os.getenv("QDRANT_PORT", "5173"))
+COLLECTION_NAME = os.getenv("COLLECTION_NAME", "pet_embeddings")
+VECTOR_SIZE = int(os.getenv("VECTOR_SIZE", "768"))
+
+PET_MODEL_PATH = os.getenv("PET_MODEL_PATH", "/home/basil/airi_pet/weights/yolov12x.pt")
+CKPT_PATH = Path(os.getenv("CKPT_PATH", "clip_face_rec_epoch_005.pth"))
+
+S3_ENDPOINT = os.getenv("S3_ENDPOINT", "")
+S3_ACCESS_KEY = os.getenv("S3_ACCESS_KEY", "")
+S3_SECRET_KEY = os.getenv("S3_SECRET_KEY", "")
+S3_BUCKET_NAME = os.getenv("S3_BUCKET_NAME", "")
+
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL", "https://openrouter.ai/api/v1")
+
+DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+
 
 def _init_database():
     """Initialize the database with required table."""
@@ -165,23 +189,9 @@ def _get_pet_data(pet_id: str) -> Optional[Dict]:
         }
     return None
 
-QDRANT_HOST = "95.31.5.36"
-QDRANT_PORT = 5173
-COLLECTION_NAME = "pet_embeddings"
-VECTOR_SIZE = 768
 
-PET_MODEL_PATH = "/home/basil/airi_pet/weights/yolov12x.pt"
 pet_model = None              
 pet_ids = []                 
-
-
-S3_ENDPOINT = "https://petss3ai.hb.ru-msk.vkcloud-storage.ru"
-S3_ACCESS_KEY = "rpkopB5hFGq1kok7L6Z8bs"
-S3_SECRET_KEY = "3mJt5mwauh1sYXYKfB9YZ23WVXqi3hatsMQ2CeTMjAsb"
-S3_BUCKET_NAME = "petss3ai"
-
-OPENAI_API_KEY = "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"
-OPENAI_BASE_URL = "https://openrouter.ai/api/v1"
 
 qdrant_client: QdrantClient | None = None
 s3_client = None
@@ -430,7 +440,6 @@ async def upload_zip_to_qdrant(file: UploadFile = File(...)):
     s3_uploads = []
     location_data = {}
     
-    # First, look for and process the JSON file
     for name in zf.namelist():
         if name.endswith('.json'):
             json_content = zf.read(name).decode('utf-8')
@@ -438,7 +447,6 @@ async def upload_zip_to_qdrant(file: UploadFile = File(...)):
             print(f"Loaded location data for {len(location_data)} pets")
             break
     
-    # Process images
     for name in zf.namelist():
         print(name)
         if name.endswith("/") or not _is_image(name):
@@ -758,7 +766,6 @@ async def get_single_pet_image(pet_id: str, filename: str):
         raise HTTPException(status_code=500, detail=f"Error retrieving image: {str(e)}")
 
 
-
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("face_embed_api:app", host="0.0.0.0", port=8000, reload=False)
+    uvicorn.run("face_embed_api:app", host="0.0.0.0", port=8502, reload=False)
